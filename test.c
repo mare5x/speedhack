@@ -1,5 +1,5 @@
 #include "stdio.h"
-#include "sysinfoapi.h"
+#include "windows.h"
 #include "stdbool.h"
 
 int main(int argc, char* argv[]) 
@@ -8,7 +8,7 @@ int main(int argc, char* argv[])
     while (true) {
         DWORD d = GetTickCount();
         if (d - w > 1000) {
-            printf("%ull\n", d);
+            printf("%lu\n", d);
             w = d;
         }
     }
