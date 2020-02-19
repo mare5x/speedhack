@@ -9,6 +9,8 @@
 
 // Note: RVAs are addresses (offsets) relative to the base address of the module.
 
+const double SPEED_FACTOR = 2.0;
+
 DWORD get_PE_header_address()
 {
 	// This is simply the start of the EXE (always). This is different from the 
@@ -90,8 +92,9 @@ DWORD IAT_hook(const char* fname, DWORD new_func)
 
 DWORD __stdcall my_GetTickCount()
 {
-	printf("my_GetTickCount\n");
-	return GetTickCount();
+	static DWORD initial_time = GetTickCount();
+	// printf("my_GetTickCount\n");
+	return initial_time + (GetTickCount() - initial_time) * SPEED_FACTOR;
 }
 
 void WINAPI speedhack(HMODULE dll)
