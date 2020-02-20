@@ -10,6 +10,7 @@
 // Note: RVAs are addresses (offsets) relative to the base address of the module.
 
 double GTC_SPEED_FACTOR = 2.0;
+double GTC64_SPEED_FACTOR = 2.0;
 double QPC_SPEED_FACTOR = 2.0;
 LARGE_INTEGER initial_performance_counter;  // For QueryPerformanceCounter
 
@@ -96,8 +97,13 @@ DWORD IAT_hook(const char* fname, DWORD new_func)
 DWORD __stdcall my_GetTickCount()
 {
 	static DWORD initial_time = GetTickCount();
-	// printf("my_GetTickCount\n");
 	return initial_time + (DWORD)((GetTickCount() - initial_time) * GTC_SPEED_FACTOR);
+}
+
+ULONGLONG __stdcall my_GetTickCount64()
+{
+	static ULONGLONG initial_time = GetTickCount64();
+	return initial_time + (ULONGLONG)((GetTickCount64() - initial_time) * GTC64_SPEED_FACTOR);
 }
 
 BOOL __stdcall my_QueryPerfomanceCounter(LARGE_INTEGER* lpPerformanceCount)
@@ -120,6 +126,17 @@ void hook_GetTickCount(double speed_factor)
 	}
 }
 
+void hook_GetTickCount64(double speed_factor)
+{
+	printf("HOOKING GetTickCount64\n");
+	GTC64_SPEED_FACTOR = speed_factor;
+	if (IAT_hook("GetTickCount64", (DWORD)(&my_GetTickCount64))) {
+		printf("Success GTC64!\n");
+	} else {
+		printf("Failure GTC64!\n");
+	}
+}
+
 void hook_QueryPerformanceCounter(double speed_factor)
 {
 	printf("HOOKING QueryPerformanceCounter\n");
@@ -136,8 +153,9 @@ void hook_QueryPerformanceCounter(double speed_factor)
 void WINAPI speedhack(HMODULE dll)
 {
 	printf("Hello, world!\n");
-	// hook_GetTickCount(2.0);
-	hook_QueryPerformanceCounter(5.0);
+	hook_GetTickCount(4.0);
+	hook_QueryPerformanceCounter(4.0);
+	hook_GetTickCount64(4.0);
 }
 
 BOOL APIENTRY DllMain( HMODULE hModule,
