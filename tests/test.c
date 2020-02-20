@@ -3,9 +3,8 @@
 #include "stdbool.h"
 #include "stdlib.h"
 
-int main(int argc, char* argv[]) 
+void tick_count_test()
 {
-	printf("PID: %lu\n", GetCurrentProcessId());
     DWORD w = GetTickCount();
 	srand(w);
     while (true) {
@@ -16,5 +15,32 @@ int main(int argc, char* argv[])
         }
 		Sleep(rand() % 100);
     }
+}
+
+void query_performance_counter_test()
+{
+	LARGE_INTEGER s, t, f;
+	QueryPerformanceFrequency(&f);
+	QueryPerformanceCounter(&s);
+	srand(s.QuadPart);
+    while (true) {
+		QueryPerformanceCounter(&t);
+        if ((t.QuadPart - s.QuadPart) * 1000000 / f.QuadPart > 1000000) {
+            printf("%llu\n", t.QuadPart);
+            s = t;
+        }
+		Sleep(rand() % 100);
+    }
+}
+
+int main(int argc, char* argv[]) 
+{
+	printf("PID: %lu\n", GetCurrentProcessId());
+	
+	switch (argv[1][0]) {
+	case '0': tick_count_test(); break;
+	case '1': query_performance_counter_test(); break;
+	}
+
     return 0;
 }
