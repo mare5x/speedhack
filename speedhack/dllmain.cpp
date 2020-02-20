@@ -14,6 +14,19 @@ double GTC64_SPEED_FACTOR = 2.0;
 double QPC_SPEED_FACTOR = 2.0;
 LARGE_INTEGER initial_performance_counter;  // For QueryPerformanceCounter
 
+// Original function pointers from the IAT.
+DWORD orig_GetTickCount;
+DWORD orig_GetTickCount64;
+DWORD orig_QueryPerfomanceCounter;
+
+
+void write_dword(DWORD adr, DWORD val)
+{
+	DWORD old_protection;
+	VirtualProtect((LPVOID)adr, sizeof(DWORD), PAGE_READWRITE, &old_protection);
+	*((DWORD*)(adr)) = val;
+	VirtualProtect((LPVOID)adr, sizeof(DWORD), old_protection, &old_protection);
+}
 
 DWORD get_PE_header_address()
 {
@@ -53,7 +66,7 @@ DWORD IAT_hook(const char* fname, DWORD new_func)
 {
 	DWORD base_adr = get_PE_header_address();
 	DWORD iat_adr = validate_IAT_integrity(base_adr);
-	printf("%x %x\n", base_adr, iat_adr);
+	// printf("%x %x\n", base_adr, iat_adr);
 	if (iat_adr == 0) {
 		return NULL;
 	}
@@ -74,16 +87,11 @@ DWORD IAT_hook(const char* fname, DWORD new_func)
 		int n = 0;
 		while (thunk->u1.Function != NULL) {
 			char* imported_function_name = (char*)(base_adr + (DWORD)(thunk->u1.AddressOfData) + sizeof(WORD));
-			printf("\t%d. %s\n", n + 1, imported_function_name);
+			// printf("\t%d. %s\n", n + 1, imported_function_name);
 			if (strcmp(fname, imported_function_name) == 0) {
 				DWORD* ftable = (DWORD*)(base_adr + import_descriptor->FirstThunk);
 				DWORD old_func = ftable[n];
-
-				DWORD old_protection;
-				VirtualProtect(&ftable[n], sizeof(DWORD), PAGE_READWRITE, &old_protection);
-				ftable[n] = new_func;
-				VirtualProtect(&ftable[n], sizeof(DWORD), old_protection, &old_protection);
-
+				write_dword((DWORD)&ftable[n], new_func);
 				return old_func;
 			}
 			++n;
@@ -119,22 +127,34 @@ void hook_GetTickCount(double speed_factor)
 {
 	printf("HOOKING GetTickCount\n");
 	GTC_SPEED_FACTOR = speed_factor;
-	if (IAT_hook("GetTickCount", (DWORD)(&my_GetTickCount))) {
+	orig_GetTickCount = IAT_hook("GetTickCount", (DWORD)(&my_GetTickCount));
+	if (orig_GetTickCount) {
 		printf("Success GTC!\n");
 	} else {
 		printf("Failure GTC!\n");
 	}
 }
 
+void unhook_GetTickCount()
+{
+	IAT_hook("GetTickCount", orig_GetTickCount);
+}
+
 void hook_GetTickCount64(double speed_factor)
 {
 	printf("HOOKING GetTickCount64\n");
 	GTC64_SPEED_FACTOR = speed_factor;
-	if (IAT_hook("GetTickCount64", (DWORD)(&my_GetTickCount64))) {
+	orig_GetTickCount64 = IAT_hook("GetTickCount64", (DWORD)(&my_GetTickCount64));
+	if (orig_GetTickCount64) {
 		printf("Success GTC64!\n");
 	} else {
 		printf("Failure GTC64!\n");
 	}
+}
+
+void unhook_GetTickCount64()
+{
+	IAT_hook("GetTickCount64", orig_GetTickCount64);
 }
 
 void hook_QueryPerformanceCounter(double speed_factor)
@@ -142,7 +162,9 @@ void hook_QueryPerformanceCounter(double speed_factor)
 	printf("HOOKING QueryPerformanceCounter\n");
 	QPC_SPEED_FACTOR = speed_factor;
 	QueryPerformanceCounter(&initial_performance_counter);
-	if (IAT_hook("QueryPerformanceCounter", (DWORD)(&my_QueryPerfomanceCounter))) {
+	orig_QueryPerfomanceCounter = IAT_hook("QueryPerformanceCounter", 
+		(DWORD)(&my_QueryPerfomanceCounter));
+	if (orig_QueryPerfomanceCounter) {
 		printf("Success QPC!\n");
 	}
 	else {
@@ -150,12 +172,27 @@ void hook_QueryPerformanceCounter(double speed_factor)
 	}
 }
 
+void unhook_QueryPerformanceCounter()
+{
+	IAT_hook("QueryPerformanceCounter", orig_QueryPerfomanceCounter);
+}
+
 void WINAPI speedhack(HMODULE dll)
 {
 	printf("Hello, world!\n");
-	hook_GetTickCount(4.0);
-	hook_QueryPerformanceCounter(4.0);
-	hook_GetTickCount64(4.0);
+	hook_GetTickCount(2.0);
+	hook_QueryPerformanceCounter(2.0);
+	hook_GetTickCount64(2.0);
+}
+
+void unhook()
+{
+	// NOTE: unhooking may cause the target process to 'freeze' 
+	// for some time. I suspect this is because it needs time 
+	// for the real time to catch up with the sped up time.
+	unhook_GetTickCount();
+	unhook_GetTickCount64();
+	unhook_QueryPerformanceCounter();
 }
 
 BOOL APIENTRY DllMain( HMODULE hModule,
@@ -166,6 +203,10 @@ BOOL APIENTRY DllMain( HMODULE hModule,
 	if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
 		HANDLE thread = CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)&speedhack, hModule, NULL, NULL);
 		CloseHandle(thread);
+	}
+	else if (ul_reason_for_call == DLL_PROCESS_DETACH && lpReserved == NULL) {
+		// If the DLL is being cleanly unloaded, clean up ...
+		unhook();
 	}
     return TRUE;
 }
