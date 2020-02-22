@@ -12,12 +12,19 @@
 double GTC_SPEED_FACTOR = 2.0;
 double GTC64_SPEED_FACTOR = 2.0;
 double QPC_SPEED_FACTOR = 2.0;
+double TGT_SPEED_FACTOR = 2.0;
 LARGE_INTEGER initial_performance_counter;  // For QueryPerformanceCounter
 
 // Original function pointers from the IAT.
-DWORD orig_GetTickCount;
-DWORD orig_GetTickCount64;
-DWORD orig_QueryPerfomanceCounter;
+typedef DWORD(WINAPI *p_GetTickCount)();
+typedef ULONGLONG(WINAPI *p_GetTickCount64)();
+typedef BOOL(WINAPI *p_QueryPerformanceCounter)(LARGE_INTEGER * lpPerformanceCount);
+typedef DWORD(WINAPI *p_timeGetTime)();
+
+p_GetTickCount orig_GetTickCount;
+p_GetTickCount64 orig_GetTickCount64;
+p_QueryPerformanceCounter orig_QueryPerfomanceCounter;
+p_timeGetTime orig_timeGetTime;
 
 
 void write_dword(DWORD adr, DWORD val)
@@ -104,67 +111,85 @@ DWORD IAT_hook(const char* fname, DWORD new_func)
 
 DWORD __stdcall my_GetTickCount()
 {
-	static DWORD initial_time = GetTickCount();
-	return initial_time + (DWORD)((GetTickCount() - initial_time) * GTC_SPEED_FACTOR);
+	static DWORD initial_time = orig_GetTickCount();
+	return initial_time + (DWORD)((orig_GetTickCount() - initial_time) * GTC_SPEED_FACTOR);
 }
 
 ULONGLONG __stdcall my_GetTickCount64()
 {
-	static ULONGLONG initial_time = GetTickCount64();
-	return initial_time + (ULONGLONG)((GetTickCount64() - initial_time) * GTC64_SPEED_FACTOR);
+	static ULONGLONG initial_time = orig_GetTickCount64();
+	return initial_time + (ULONGLONG)((orig_GetTickCount64() - initial_time) * GTC64_SPEED_FACTOR);
 }
 
 BOOL __stdcall my_QueryPerfomanceCounter(LARGE_INTEGER* lpPerformanceCount)
 {
 	LARGE_INTEGER pc;
-	BOOL res = QueryPerformanceCounter(&pc);
+	BOOL res = orig_QueryPerfomanceCounter(&pc);
 	lpPerformanceCount->QuadPart = initial_performance_counter.QuadPart + 
 		(LONGLONG)((pc.QuadPart - initial_performance_counter.QuadPart) * QPC_SPEED_FACTOR);
 	return res;
+}
+
+DWORD __stdcall my_timeGetTime()
+{
+	static DWORD initial_time = orig_timeGetTime();
+	return initial_time + (DWORD)((orig_timeGetTime() - initial_time) * GTC_SPEED_FACTOR);
 }
 
 void hook_GetTickCount(double speed_factor)
 {
 	printf("HOOKING GetTickCount\n");
 	GTC_SPEED_FACTOR = speed_factor;
-	orig_GetTickCount = IAT_hook("GetTickCount", (DWORD)(&my_GetTickCount));
-	if (orig_GetTickCount) {
-		printf("Success GTC!\n");
-	} else {
-		printf("Failure GTC!\n");
-	}
+	orig_GetTickCount = (p_GetTickCount)IAT_hook("GetTickCount", (DWORD)(&my_GetTickCount));
+	orig_GetTickCount ? printf("Success GTC\n") : printf("Failure GTC!\n");
 }
 
 void unhook_GetTickCount()
 {
-	IAT_hook("GetTickCount", orig_GetTickCount);
+	if (orig_GetTickCount) {
+		IAT_hook("GetTickCount", (DWORD)orig_GetTickCount);
+	}
 }
 
 void hook_GetTickCount64(double speed_factor)
 {
 	printf("HOOKING GetTickCount64\n");
 	GTC64_SPEED_FACTOR = speed_factor;
-	orig_GetTickCount64 = IAT_hook("GetTickCount64", (DWORD)(&my_GetTickCount64));
-	if (orig_GetTickCount64) {
-		printf("Success GTC64!\n");
-	} else {
-		printf("Failure GTC64!\n");
-	}
+	orig_GetTickCount64 = (p_GetTickCount64)IAT_hook("GetTickCount64", 
+		(DWORD)(&my_GetTickCount64));
+	orig_GetTickCount ? printf("Success GTC64\n") : printf("Failure GTC64!\n");
 }
 
 void unhook_GetTickCount64()
 {
-	IAT_hook("GetTickCount64", orig_GetTickCount64);
+	if (orig_GetTickCount64) {
+		IAT_hook("GetTickCount64", (DWORD)orig_GetTickCount64);
+	}
+}
+
+void hook_timeGetTime(double speed_factor)
+{
+	printf("HOOKING timeGetTime\n");
+	TGT_SPEED_FACTOR = speed_factor;
+	orig_timeGetTime = (p_timeGetTime)IAT_hook("timeGetTime", (DWORD)(&my_timeGetTime));
+	orig_timeGetTime ? printf("Success TGT\n") : printf("Failure TGT\n");
+}
+
+void unhook_timeGetTime()
+{
+	if (orig_timeGetTime) {
+		IAT_hook("timeGetTime", (DWORD)orig_timeGetTime);
+	}
 }
 
 void hook_QueryPerformanceCounter(double speed_factor)
 {
 	printf("HOOKING QueryPerformanceCounter\n");
 	QPC_SPEED_FACTOR = speed_factor;
-	QueryPerformanceCounter(&initial_performance_counter);
-	orig_QueryPerfomanceCounter = IAT_hook("QueryPerformanceCounter", 
+	orig_QueryPerfomanceCounter = (p_QueryPerformanceCounter)IAT_hook("QueryPerformanceCounter", 
 		(DWORD)(&my_QueryPerfomanceCounter));
 	if (orig_QueryPerfomanceCounter) {
+		orig_QueryPerfomanceCounter(&initial_performance_counter);
 		printf("Success QPC!\n");
 	}
 	else {
@@ -174,7 +199,9 @@ void hook_QueryPerformanceCounter(double speed_factor)
 
 void unhook_QueryPerformanceCounter()
 {
-	IAT_hook("QueryPerformanceCounter", orig_QueryPerfomanceCounter);
+	if (orig_QueryPerfomanceCounter) {
+		IAT_hook("QueryPerformanceCounter", (DWORD)orig_QueryPerfomanceCounter);
+	}
 }
 
 void WINAPI speedhack(HMODULE dll)
@@ -183,6 +210,7 @@ void WINAPI speedhack(HMODULE dll)
 	hook_GetTickCount(2.0);
 	hook_QueryPerformanceCounter(2.0);
 	hook_GetTickCount64(2.0);
+	hook_timeGetTime(2.0);
 }
 
 void unhook()
@@ -193,6 +221,7 @@ void unhook()
 	unhook_GetTickCount();
 	unhook_GetTickCount64();
 	unhook_QueryPerformanceCounter();
+	unhook_timeGetTime();
 }
 
 BOOL APIENTRY DllMain( HMODULE hModule,

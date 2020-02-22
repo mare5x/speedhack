@@ -50,6 +50,21 @@ void query_performance_counter_test()
     }
 }
 
+void time_get_time_test()
+{
+	printf("timeGetTime test ... \n");
+    DWORD w = timeGetTime();
+	srand(w);
+    while (true) {
+        DWORD d = timeGetTime();
+        if (d - w > 1000) {
+            printf("%lu\n", d);
+            w = d;
+        }
+		Sleep(rand() % 100);
+    }
+}
+
 int main(int argc, char* argv[]) 
 {
 	printf("PID: %lu\n", GetCurrentProcessId());
@@ -58,6 +73,7 @@ int main(int argc, char* argv[])
 	case '0': tick_count_test(); break;
 	case '1': tick_count_64_test(); break;
 	case '2': query_performance_counter_test(); break;
+	case '3': time_get_time_test(); break;
 	}
 
     return 0;
