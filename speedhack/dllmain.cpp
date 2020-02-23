@@ -1,6 +1,7 @@
 // dllmain.cpp : Defines the entry point for the DLL application.
 #include "stdafx.h"
 #include <cstdio>
+#include "win_console.h"
 
 // All information regarding PEs (EXEs) can be found here:
 // https://docs.microsoft.com/en-us/windows/win32/debug/pe-format
@@ -69,7 +70,8 @@ DWORD validate_IAT_integrity(DWORD base_adr)
 // Perform an Import Address Table hook. 
 // In the table replace the function named 'fname' to point to 'new_func'.
 // On success return the replaced address in the IAT. NULL otherwise.
-DWORD IAT_hook(const char* fname, DWORD new_func)
+// IF module_name is given, only the functions in that dll will be scanned.
+DWORD IAT_hook(const char* fname, DWORD new_func, const char* module_name = NULL)
 {
 	DWORD base_adr = get_PE_header_address();
 	DWORD iat_adr = validate_IAT_integrity(base_adr);
@@ -83,7 +85,12 @@ DWORD IAT_hook(const char* fname, DWORD new_func)
 	// Arrays are terminated by an all null element.
 	IMAGE_IMPORT_DESCRIPTOR* import_descriptor = (IMAGE_IMPORT_DESCRIPTOR*)iat_adr;
 	while (import_descriptor->FirstThunk != NULL) {
-		printf("%s\n", (char*)(import_descriptor->Name + base_adr));
+		char* dll_name = (char*)(import_descriptor->Name + base_adr);
+		printf("%s\n", dll_name);
+		if (module_name != NULL && strcmp(dll_name, module_name) != 0) {
+			import_descriptor++;
+			continue;
+		}
 		
 		// Each thunk is a union. 
 		// There are 2 arrays: OriginalFirstThunk and FirstThunk.
@@ -94,7 +101,8 @@ DWORD IAT_hook(const char* fname, DWORD new_func)
 		int n = 0;
 		while (thunk->u1.Function != NULL) {
 			char* imported_function_name = (char*)(base_adr + (DWORD)(thunk->u1.AddressOfData) + sizeof(WORD));
-			// printf("\t%d. %s\n", n + 1, imported_function_name);
+			printf("\t%d. %s\n", n + 1, imported_function_name);
+			// NOTE: sometimes trying to read the name string results in an Access violation error!
 			if (strcmp(fname, imported_function_name) == 0) {
 				DWORD* ftable = (DWORD*)(base_adr + import_descriptor->FirstThunk);
 				DWORD old_func = ftable[n];
@@ -156,7 +164,7 @@ void hook_GetTickCount64(double speed_factor)
 	printf("HOOKING GetTickCount64\n");
 	GTC64_SPEED_FACTOR = speed_factor;
 	orig_GetTickCount64 = (p_GetTickCount64)IAT_hook("GetTickCount64", 
-		(DWORD)(&my_GetTickCount64));
+		(DWORD)(&my_GetTickCount64), "KERNEL32.dll");
 	orig_GetTickCount ? printf("Success GTC64\n") : printf("Failure GTC64!\n");
 }
 
@@ -186,8 +194,15 @@ void hook_QueryPerformanceCounter(double speed_factor)
 {
 	printf("HOOKING QueryPerformanceCounter\n");
 	QPC_SPEED_FACTOR = speed_factor;
-	orig_QueryPerfomanceCounter = (p_QueryPerformanceCounter)IAT_hook("QueryPerformanceCounter", 
+
+	// Try multiple versions of the function ...
+	orig_QueryPerfomanceCounter = (p_QueryPerformanceCounter)IAT_hook("RtlQueryPerformanceCounter", 
 		(DWORD)(&my_QueryPerfomanceCounter));
+	if (orig_QueryPerfomanceCounter == NULL) {
+		orig_QueryPerfomanceCounter = (p_QueryPerformanceCounter)IAT_hook("QueryPerformanceCounter", 
+			(DWORD)(&my_QueryPerfomanceCounter));
+	}
+
 	if (orig_QueryPerfomanceCounter) {
 		orig_QueryPerfomanceCounter(&initial_performance_counter);
 		printf("Success QPC!\n");
@@ -206,11 +221,12 @@ void unhook_QueryPerformanceCounter()
 
 void WINAPI speedhack(HMODULE dll)
 {
+	open_console();
 	printf("Hello, world!\n");
-	hook_GetTickCount(2.0);
-	hook_QueryPerformanceCounter(2.0);
-	hook_GetTickCount64(2.0);
-	hook_timeGetTime(2.0);
+	hook_GetTickCount(4.0);
+	hook_QueryPerformanceCounter(4.0);
+	hook_GetTickCount64(4.0);
+	hook_timeGetTime(4.0);
 }
 
 void unhook()
@@ -222,6 +238,7 @@ void unhook()
 	unhook_GetTickCount64();
 	unhook_QueryPerformanceCounter();
 	unhook_timeGetTime();
+	close_console();
 }
 
 BOOL APIENTRY DllMain( HMODULE hModule,
