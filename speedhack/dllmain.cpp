@@ -17,10 +17,7 @@
 
 // Note: RVAs are addresses (offsets) relative to the base address of the module.
 
-double GTC_SPEED_FACTOR = 2.0;
-double GTC64_SPEED_FACTOR = 2.0;
-double QPC_SPEED_FACTOR = 2.0;
-double TGT_SPEED_FACTOR = 2.0;
+double SPEED_FACTOR = 2.0;
 LARGE_INTEGER initial_performance_counter;  // For QueryPerformanceCounter
 
 typedef DWORD(WINAPI *p_GetTickCount)();
@@ -328,14 +325,14 @@ DWORD __stdcall my_GetTickCount()
 {
 	static p_GetTickCount func = (p_GetTickCount)GetTickCount_hook.original_function;
 	static DWORD initial_time = func();
-	return initial_time + (DWORD)((func() - initial_time) * GTC_SPEED_FACTOR);
+	return initial_time + (DWORD)((func() - initial_time) * SPEED_FACTOR);
 }
 
 ULONGLONG __stdcall my_GetTickCount64()
 {
 	static p_GetTickCount64 func = (p_GetTickCount64)GetTickCount64_hook.original_function;
 	static ULONGLONG initial_time = func();
-	return initial_time + (ULONGLONG)((func() - initial_time) * GTC64_SPEED_FACTOR);
+	return initial_time + (ULONGLONG)((func() - initial_time) * SPEED_FACTOR);
 }
 
 BOOL __stdcall my_QueryPerfomanceCounter(LARGE_INTEGER* lpPerformanceCount)
@@ -344,7 +341,7 @@ BOOL __stdcall my_QueryPerfomanceCounter(LARGE_INTEGER* lpPerformanceCount)
 	LARGE_INTEGER pc;
 	BOOL res = func(&pc);
 	lpPerformanceCount->QuadPart = initial_performance_counter.QuadPart + 
-		(LONGLONG)((pc.QuadPart - initial_performance_counter.QuadPart) * QPC_SPEED_FACTOR);
+		(LONGLONG)((pc.QuadPart - initial_performance_counter.QuadPart) * SPEED_FACTOR);
 	return res;
 }
 
@@ -352,13 +349,13 @@ DWORD __stdcall my_timeGetTime()
 {
 	static p_timeGetTime func = (p_timeGetTime)timeGetTime_hook.original_function;
 	static DWORD initial_time = func();
-	return initial_time + (DWORD)((func() - initial_time) * GTC_SPEED_FACTOR);
+	return initial_time + (DWORD)((func() - initial_time) * SPEED_FACTOR);
 }
 
 void hook_GetTickCount(double speed_factor)
 {
 	printf("HOOKING GetTickCount\n");
-	GTC_SPEED_FACTOR = speed_factor;
+	SPEED_FACTOR = speed_factor;
 
 	GetTickCount_hook.function_name = "GetTickCount";
 	GetTickCount_hook.hooked_function = (DWORD)(&my_GetTickCount);
@@ -379,7 +376,7 @@ void unhook_GetTickCount()
 void hook_GetTickCount64(double speed_factor)
 {
 	printf("HOOKING GetTickCount64\n");
-	GTC64_SPEED_FACTOR = speed_factor;
+	SPEED_FACTOR = speed_factor;
 
 	GetTickCount64_hook.function_name = "GetTickCount64";
 	GetTickCount64_hook.hooked_function = (DWORD)(&my_GetTickCount64);
@@ -400,7 +397,7 @@ void unhook_GetTickCount64()
 void hook_timeGetTime(double speed_factor)
 {
 	printf("HOOKING timeGetTime\n");
-	TGT_SPEED_FACTOR = speed_factor;
+	SPEED_FACTOR = speed_factor;
 
 	timeGetTime_hook.function_name = "timeGetTime";
 	timeGetTime_hook.hooked_function = (DWORD)(&my_timeGetTime);
@@ -420,7 +417,7 @@ void unhook_timeGetTime()
 void hook_QueryPerformanceCounter(double speed_factor)
 {
 	printf("HOOKING QueryPerformanceCounter\n");
-	QPC_SPEED_FACTOR = speed_factor;
+	SPEED_FACTOR = speed_factor;
 
 	// Try multiple versions of the function ...
 	QueryPerfomanceCounter_hook.function_name = "RtlQueryPerformanceCounter";
@@ -452,10 +449,10 @@ void WINAPI speedhack(HMODULE dll)
 {
 	open_console();
 	printf("Hello, world!\n");
-	hook_GetTickCount(4.0);
-	hook_GetTickCount64(4.0);
-	hook_timeGetTime(4.0);
-	hook_QueryPerformanceCounter(4.0);
+	hook_GetTickCount(SPEED_FACTOR);
+	hook_GetTickCount64(SPEED_FACTOR);
+	hook_timeGetTime(SPEED_FACTOR);
+	hook_QueryPerformanceCounter(SPEED_FACTOR);
 	/*
 	std::unordered_map<std::string, DWORD> map;
 	traverse_imported_symbols(map);
@@ -474,6 +471,13 @@ void unhook()
 	unhook_QueryPerformanceCounter();
 	unhook_timeGetTime();
 	close_console();
+}
+
+extern "C" __declspec(dllexport)
+void __stdcall api_set_speed(float speed)
+{
+	printf("API: SET_SPEED -> %f\n", speed);
+	SPEED_FACTOR = speed;
 }
 
 BOOL APIENTRY DllMain( HMODULE hModule,
