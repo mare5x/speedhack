@@ -245,7 +245,7 @@ DWORD IAT_hook_modules(IATHookInfo* hook_info)
 	size_t retval;
 	if (Module32First(snapshot, &entry) == TRUE) {
 		do {
-			printf("\n%ws %x\n", entry.szModule, entry.hModule);
+			// printf("\n%ws %x\n", entry.szModule, entry.hModule);
 			wcstombs_s(&retval, mod_str, 512, entry.szModule, _TRUNCATE);
 			hook_info->base_module_name = mod_str;
 			DWORD ret = IAT_hook(hook_info);
@@ -465,7 +465,9 @@ void unhook()
 {
 	// NOTE: unhooking may cause the target process to 'freeze' 
 	// for some time. I suspect this may be because it needs time 
-	// for the real time to catch up with the sped up time?
+	// for the real time to catch up with the sped up time? Yes, see
+	// explanation in test.c.
+	// Possible 'solution': don't unload the dll, instead set speed to 1?
 	unhook_GetTickCount();
 	unhook_GetTickCount64();
 	unhook_QueryPerformanceCounter();
@@ -473,11 +475,18 @@ void unhook()
 	close_console();
 }
 
+// This function is called externally from speedhackAPI, to provide a 
+// foreign means of access to the speedhack.
 extern "C" __declspec(dllexport)
 void __stdcall api_set_speed(float speed)
 {
 	printf("API: SET_SPEED -> %f\n", speed);
 	SPEED_FACTOR = speed;
+	// NOTE: if we wanted to support seamless speed transitions
+	// (when decreasing speed - see test.c explanation), we would
+	// have to set the initial times in the hooked time 
+	// functions to the current simulated time. However, unhooking
+	// would be even more problematic. Worth it? Probably...
 }
 
 BOOL APIENTRY DllMain( HMODULE hModule,

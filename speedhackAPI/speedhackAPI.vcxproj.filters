@@ -18,5 +18,13 @@
     <ClCompile Include="speedhack_api.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\dll_inject\dll_inject.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\dll_inject\dll_inject.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

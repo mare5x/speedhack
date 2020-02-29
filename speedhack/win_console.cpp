@@ -6,7 +6,11 @@ FILE* p_cout;
 
 void open_console()
 {
-	AllocConsole();
+	// A process can be associated with only one console, so the AllocConsole function 
+	// fails if the calling process already has a console.
+	if (AllocConsole() == 0) {
+		return;
+	}
 	freopen_s(&p_cout, "CONOUT$", "w", stdout);
 
 	// Set output mode to handle virtual terminal sequences
@@ -28,9 +32,11 @@ void close_console()
 
 	// "The freopen_s function closes the file currently associated with stream and reassigns stream to the file specified by path."
 	// by using NUL, we redirect output to null
-	freopen_s(&p_cout, "NUL", "w", stdout);
+	if (p_cout) {
+		freopen_s(&p_cout, "NUL", "w", stdout);
 
-	FreeConsole();
+		FreeConsole();
+	}
 }
 
 void hide_console()

@@ -1,5 +1,6 @@
 #include "windows.h"
 #include <stdio.h>
+#include "../dll_inject/dll_inject.h"
 
 typedef void(__stdcall *p_api_set_speed)(float);
 const char* API_SET_SPEED_NAME = "_api_set_speed@4";  // function export name (see speedhack.dll)
@@ -81,6 +82,7 @@ void api_set_speed(HANDLE process, float factor)
 	}
 }
 
+const char* HELP_STR = "speedhackAPI <PID> <DLL>";
 
 int main(int argc, char* argv[])
 {
@@ -92,12 +94,23 @@ int main(int argc, char* argv[])
 		return 0;
 	}
 
-	HMODULE dll_handle = (HMODULE)get_dll_handle(process_handle, dll_path);
+	HMODULE dll_handle = load_dll(process_handle, dll_path);
+	if (dll_handle == NULL) {
+		printf("Error loading dll %s\n", dll_path);
+	} else {
+		printf("DLL loading successful %s --> %x\n", dll_path, dll_handle);
+	}
+
+	// HMODULE dll_handle = (HMODULE)get_dll_handle(process_handle, dll_path);
 	f_api_set_speed = get_proc_address(process_handle, dll_handle, API_SET_SPEED_NAME);
 
 	while (1) {
 		float speed;
-		scanf_s("%f", &speed);
-		api_set_speed(process_handle, speed);
+		if (scanf_s("%f", &speed)) {
+			api_set_speed(process_handle, speed);
+		} else {
+			unload_dll_by_handle(process_handle, dll_handle);
+			break;
+		}
 	}
 }
