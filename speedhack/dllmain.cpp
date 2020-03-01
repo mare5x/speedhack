@@ -18,7 +18,6 @@
 // Note: RVAs are addresses (offsets) relative to the base address of the module.
 
 double SPEED_FACTOR = 2.0;
-LARGE_INTEGER initial_performance_counter;  // For QueryPerformanceCounter
 
 typedef DWORD(WINAPI *p_GetTickCount)();
 typedef ULONGLONG(WINAPI *p_GetTickCount64)();
@@ -39,6 +38,12 @@ IATHookInfo GetTickCount_hook;
 IATHookInfo GetTickCount64_hook;
 IATHookInfo QueryPerfomanceCounter_hook;
 IATHookInfo timeGetTime_hook;
+
+// Request initial time reset for speed change. 
+bool REQUESTGetTickCount = true; 
+bool REQUESTGetTickCount64 = true; 
+bool REQUESTQueryPerformanceCounter = true; 
+bool REQUESTtimeGetTime = true;
 
 
 void write_dword(DWORD adr, DWORD val)
@@ -323,33 +328,70 @@ void print_modules()
 
 DWORD __stdcall my_GetTickCount()
 {
-	static p_GetTickCount func = (p_GetTickCount)GetTickCount_hook.original_function;
-	static DWORD initial_time = func();
-	return initial_time + (DWORD)((func() - initial_time) * SPEED_FACTOR);
+	// To make speed changes seamless (make the clock appear to 
+	// be always increasing - otherwise time differences could be negative), 
+	// we need to keep track of the real time of a speed change (initial_time), 
+	// of the simulated time of a speed change (simulated_initial_time),
+	// and of the current simulated time (simulated_time).
+	static p_GetTickCount original = (p_GetTickCount)GetTickCount_hook.original_function;
+	static DWORD initial_time = original();
+	static DWORD simulated_initial_time = initial_time;
+	static DWORD simulated_time = initial_time;
+	if (REQUESTGetTickCount) {
+		initial_time = original();
+		simulated_initial_time = simulated_time;
+		REQUESTGetTickCount = false;
+	}
+	simulated_time = simulated_initial_time + (DWORD)((original() - initial_time) * SPEED_FACTOR);
+	return simulated_time;
 }
 
 ULONGLONG __stdcall my_GetTickCount64()
 {
-	static p_GetTickCount64 func = (p_GetTickCount64)GetTickCount64_hook.original_function;
-	static ULONGLONG initial_time = func();
-	return initial_time + (ULONGLONG)((func() - initial_time) * SPEED_FACTOR);
+	static p_GetTickCount64 original = (p_GetTickCount64)GetTickCount64_hook.original_function;
+	static ULONGLONG initial_time = original();
+	static ULONGLONG simulated_initial_time = initial_time;
+	static ULONGLONG simulated_time = initial_time;
+	if (REQUESTGetTickCount64) {
+		initial_time = original();
+		simulated_initial_time = simulated_time;
+		REQUESTGetTickCount64 = false;
+	}
+	simulated_time = simulated_initial_time + (ULONGLONG)((original() - initial_time) * SPEED_FACTOR);
+	return simulated_time;
 }
 
 BOOL __stdcall my_QueryPerfomanceCounter(LARGE_INTEGER* lpPerformanceCount)
 {
-	static p_QueryPerformanceCounter func = (p_QueryPerformanceCounter)QueryPerfomanceCounter_hook.original_function;
-	LARGE_INTEGER pc;
-	BOOL res = func(&pc);
-	lpPerformanceCount->QuadPart = initial_performance_counter.QuadPart + 
-		(LONGLONG)((pc.QuadPart - initial_performance_counter.QuadPart) * SPEED_FACTOR);
+	static p_QueryPerformanceCounter original = (p_QueryPerformanceCounter)QueryPerfomanceCounter_hook.original_function;
+	static LARGE_INTEGER initial_pc = {};
+	static LARGE_INTEGER simulated_initial_pc = initial_pc;
+	static LARGE_INTEGER simulated_pc = initial_pc;
+	if (REQUESTQueryPerformanceCounter) {
+		original(&initial_pc);
+		simulated_initial_pc = simulated_pc.QuadPart == 0 ? initial_pc : simulated_pc;
+		REQUESTQueryPerformanceCounter = false;
+	}
+	BOOL res = original(lpPerformanceCount);
+	simulated_pc.QuadPart = simulated_initial_pc.QuadPart + 
+		(LONGLONG)((lpPerformanceCount->QuadPart - initial_pc.QuadPart) * SPEED_FACTOR);
+	lpPerformanceCount->QuadPart = simulated_pc.QuadPart;
 	return res;
 }
 
 DWORD __stdcall my_timeGetTime()
 {
-	static p_timeGetTime func = (p_timeGetTime)timeGetTime_hook.original_function;
-	static DWORD initial_time = func();
-	return initial_time + (DWORD)((func() - initial_time) * SPEED_FACTOR);
+	static p_timeGetTime original = (p_timeGetTime)timeGetTime_hook.original_function;
+	static DWORD initial_time = original();
+	static DWORD simulated_initial_time = initial_time;
+	static DWORD simulated_time = initial_time;
+	if (REQUESTtimeGetTime) {
+		initial_time = original();
+		simulated_initial_time = simulated_time;
+		REQUESTtimeGetTime = false;
+	}
+	simulated_time = simulated_initial_time + (DWORD)((original() - initial_time) * SPEED_FACTOR);
+	return simulated_time;
 }
 
 void hook_GetTickCount(double speed_factor)
@@ -428,14 +470,8 @@ void hook_QueryPerformanceCounter(double speed_factor)
 		ret = IAT_hook_modules(&QueryPerfomanceCounter_hook);
 	}
 
-	if (ret) {
-		p_QueryPerformanceCounter func = (p_QueryPerformanceCounter)QueryPerfomanceCounter_hook.original_function;
-		func(&initial_performance_counter);
-		print_hook_info(&QueryPerfomanceCounter_hook);
-	}
-	else {
-		printf("Cannot hook %s\n", QueryPerfomanceCounter_hook.function_name);
-	}
+	if (ret) print_hook_info(&QueryPerfomanceCounter_hook);
+	else printf("Cannot hook %s\n", QueryPerfomanceCounter_hook.function_name);
 }
 
 void unhook_QueryPerformanceCounter()
@@ -482,11 +518,12 @@ void __stdcall api_set_speed(float speed)
 {
 	printf("API: SET_SPEED -> %f\n", speed);
 	SPEED_FACTOR = speed;
-	// NOTE: if we wanted to support seamless speed transitions
-	// (when decreasing speed - see test.c explanation), we would
-	// have to set the initial times in the hooked time 
-	// functions to the current simulated time. However, unhooking
-	// would be even more problematic. Worth it? Probably...
+	// NOTE: Because of resetting initial timers, unhooking may be even more problematic,
+	// due to bigger time differences ...
+	REQUESTGetTickCount = 
+		REQUESTGetTickCount64 = 
+		REQUESTQueryPerformanceCounter = 
+		REQUESTtimeGetTime = true;
 }
 
 BOOL APIENTRY DllMain( HMODULE hModule,
