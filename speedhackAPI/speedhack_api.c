@@ -82,12 +82,17 @@ void api_set_speed(HANDLE process, float factor)
 	}
 }
 
-const char* HELP_STR = "speedhackAPI <PID> <DLL>";
+const char* HELP_STR = "speedhackAPI <DLL> <PID>";
 
 int main(int argc, char* argv[])
 {
-	DWORD pid = atol(argv[1]);
-	const char* dll_path = argv[2];
+	if (argc < 3) {
+		printf("%s\n", HELP_STR);
+		return 0;
+	}
+
+	const char* dll_path = argv[1];
+	DWORD pid = atol(argv[2]);
 	HANDLE process_handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
 	if (process_handle == NULL) {
 		printf("Cannot open process... %lu %s\n", pid, dll_path);

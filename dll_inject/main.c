@@ -1,7 +1,7 @@
 #include "dll_inject.h"
 #include <stdio.h>
 
-const char* HELP_STR = "dll_inject <PID> <DLL> [u]";
+const char* HELP_STR = "dll_inject <DLL> <PID> [u]";
 
 int main(int argc, char* argv[]) 
 {
@@ -10,8 +10,8 @@ int main(int argc, char* argv[])
 		return 0;
 	}
 
-	DWORD pid = atol(argv[1]);
-	const char* dll_path = argv[2];
+	const char* dll_path = argv[1];
+	DWORD pid = atol(argv[2]);
 	HANDLE proc_handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
 	if (proc_handle == NULL) {
 		printf("Cannot open process... %lu %s\n", pid, dll_path);
