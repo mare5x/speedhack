@@ -15,7 +15,13 @@
 // NOTE: dbghelp.dll
 // CheatEngine uses symbol handler functions from the above library.
 
-// Note: RVAs are addresses (offsets) relative to the base address of the module.
+// NOTE: RVAs are addresses (offsets) relative to the base address of the module.
+
+// NOTE: The problem with IAT hooking is that multiple modules can (recursively) import
+// the same function we would like to hook. That means all such IAT entries
+// should be replaced ... But if we just hook the actual function being
+// imported (it exists in one place only - it's shared), we would hinder with other processes
+// using that DLL ...
 
 double SPEED_FACTOR = 2.0;
 
@@ -32,6 +38,8 @@ struct IATHookInfo {
 	DWORD table_address;				// Address of table entry in which there is the function address.
 	DWORD original_function;			// Address of the replaced function in the table.
 	DWORD hooked_function;				// Address of the function which replaces the original function.
+
+	IATHookInfo* _next;					// Linked list of hook infos. 
 };
 
 IATHookInfo GetTickCount_hook;
@@ -243,28 +251,57 @@ DWORD IAT_hook(IATHookInfo* hook_info)
 
 DWORD IAT_hook_modules(IATHookInfo* hook_info)
 {
+	// Attempt to hook the given function in all base process modules.
+	// The function might not get hooked if it's referenced deeper in the
+	// import tree ...
+
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, NULL);
 	MODULEENTRY32 entry;
 	entry.dwSize = sizeof(MODULEENTRY32);  // Must be done (see docs).
-	char* mod_str = (char*)malloc(512);  // I don't care about freeing this memory ...
+	char* mod_str = (char*)malloc(256);  // I don't care about freeing this memory ...
 	size_t retval;
+	DWORD num_hooks = 0;
 	if (Module32First(snapshot, &entry) == TRUE) {
 		do {
 			// printf("\n%ws %x\n", entry.szModule, entry.hModule);
-			wcstombs_s(&retval, mod_str, 512, entry.szModule, _TRUNCATE);
+			wcstombs_s(&retval, mod_str, 256, entry.szModule, _TRUNCATE);
 			hook_info->base_module_name = mod_str;
 			DWORD ret = IAT_hook(hook_info);
-			if (ret) return ret;
+			if (ret) {
+				num_hooks++;
+				hook_info->_next = (IATHookInfo*)malloc(sizeof IATHookInfo);
+				memcpy(hook_info->_next, hook_info, sizeof IATHookInfo);
+				hook_info = hook_info->_next;
+				hook_info->table_address = NULL;
+				hook_info->_next = NULL;
+				mod_str = (char*)malloc(256);
+			}
 		} while (Module32Next(snapshot, &entry));
 	}
-	return 0;
+	return num_hooks;
+}
+
+void unhook_IATHook(IATHookInfo* hook)
+{
+	if (hook == NULL) return;
+
+	if (hook->table_address) {
+		write_dword(hook->table_address, hook->original_function);
+	}
+	if (hook->_next) {
+		unhook_IATHook(hook->_next);
+		// Don't free the initial HookInfo because it's global ...
+		free(hook->_next);
+	}
 }
 
 void print_hook_info(IATHookInfo* hook_info)
 {
+	if (hook_info == NULL || hook_info->table_address == NULL) return;
 	printf("%s\n", hook_info->base_module_name ? hook_info->base_module_name : "<PROCESS>");
 	printf(" %s :: %s\n", hook_info->imported_module_name, hook_info->function_name);
 	printf(" IAT %x :: %x -> %x\n", hook_info->table_address, hook_info->original_function, hook_info->hooked_function);
+	print_hook_info(hook_info->_next);
 }
 
 int traverse_imported_symbols(std::unordered_map<std::string, DWORD>& map, const char* module = NULL, int depth = 0)
@@ -410,9 +447,7 @@ void hook_GetTickCount(double speed_factor)
 
 void unhook_GetTickCount()
 {
-	if (GetTickCount_hook.table_address) {
-		write_dword(GetTickCount_hook.table_address, GetTickCount_hook.original_function);
-	}
+	unhook_IATHook(&GetTickCount_hook);
 }
 
 void hook_GetTickCount64(double speed_factor)
@@ -431,9 +466,7 @@ void hook_GetTickCount64(double speed_factor)
 
 void unhook_GetTickCount64()
 {
-	if (GetTickCount64_hook.table_address) {
-		write_dword(GetTickCount64_hook.table_address, GetTickCount64_hook.original_function);
-	}
+	unhook_IATHook(&GetTickCount64_hook);
 }
 
 void hook_timeGetTime(double speed_factor)
@@ -451,9 +484,7 @@ void hook_timeGetTime(double speed_factor)
 
 void unhook_timeGetTime()
 {
-	if (timeGetTime_hook.table_address) {
-		write_dword(timeGetTime_hook.table_address, timeGetTime_hook.original_function);
-	}
+	unhook_IATHook(&timeGetTime_hook);
 }
 
 void hook_QueryPerformanceCounter(double speed_factor)
@@ -462,11 +493,11 @@ void hook_QueryPerformanceCounter(double speed_factor)
 	SPEED_FACTOR = speed_factor;
 
 	// Try multiple versions of the function ...
-	QueryPerfomanceCounter_hook.function_name = "RtlQueryPerformanceCounter";
+	QueryPerfomanceCounter_hook.function_name = "QueryPerformanceCounter";
 	QueryPerfomanceCounter_hook.hooked_function = (DWORD)(&my_QueryPerfomanceCounter);
 	DWORD ret = IAT_hook_modules(&QueryPerfomanceCounter_hook);
 	if (!ret) {
-		QueryPerfomanceCounter_hook.function_name = "QueryPerformanceCounter";
+		QueryPerfomanceCounter_hook.function_name = "RtlQueryPerformanceCounter";
 		ret = IAT_hook_modules(&QueryPerfomanceCounter_hook);
 	}
 
@@ -476,9 +507,7 @@ void hook_QueryPerformanceCounter(double speed_factor)
 
 void unhook_QueryPerformanceCounter()
 {
-	if (QueryPerfomanceCounter_hook.table_address) {
-		write_dword(QueryPerfomanceCounter_hook.table_address, QueryPerfomanceCounter_hook.original_function);
-	}
+	unhook_IATHook(&QueryPerfomanceCounter_hook);
 }
 
 void WINAPI speedhack(HMODULE dll)
